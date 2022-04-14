@@ -1,0 +1,5 @@
+.pio
+lib
+test
+include
+**/credentials.h
