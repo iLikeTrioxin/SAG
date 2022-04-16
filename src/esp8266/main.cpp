@@ -13,9 +13,12 @@
 ESP8266WebServer server(80);
 
 void handleApi() {
+    digitalWrite(LED_BUILTIN, HIGH);
+
     if(!server.args() || !server.hasArg('method')) return;
 
-    String method = server.arg('method');
+    String method   = server.arg('method');
+    String response = "";
 
     switch (method) {
     case "setcriticaltemp":
@@ -27,8 +30,8 @@ void handleApi() {
     case "setpumpminrpm":
         if(server.hasArg('rpm')) Serial.send("setpumpminrpm " + server.arg('rpm'));
         break;
-    case "setvoltagedividerr1":
-        if(server.hasArg('r1')) Serial.send("setvoltagedividerr1 " + server.arg('r1'));
+    case "setpumptargetrpm":
+        if(server.hasArg('rpm')) Serial.send("setpumptargetrpm " + server.arg('rpm'));
         break;
     case "activate":
         Serial.send("activate");
@@ -36,44 +39,22 @@ void handleApi() {
     case "shutdown":
         Serial.send("shutdown");
         break;
-    case "debug":
-        Serial.send("debug");
+    case "info":
+        Serial.send("info");
+        while(!Serial.available()) delay(100);
+        response = Serial.readString();
         break;
     default:
         break;
     }
 
-    digitalWrite(led, 1);
-    char temp[400];
-    int sec = millis() / 1000;
-    int min = sec / 60;
-    int hr = min / 60;
-
-    snprintf(temp, 400,
-
-                     "<html>\
-    <head>\
-        <meta http-equiv='refresh' content='5'/>\
-        <title>ESP8266 Demo</title>\
-        <style>\
-            body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; }\
-        </style>\
-    </head>\
-    <body>\
-        <h1>Hello from ESP8266!</h1>\
-        <p>Uptime: %02d:%02d:%02d</p>\
-        <img src=\"/test.svg\" />\
-    </body>\
-</html>",
-
-                     hr, min % 60, sec % 60
-                    );
-    server.send(200, "text/html", temp);
-    digitalWrite(led, 0);
+    server.send(200, "application/json", response);
+    digitalWrite(LED_BUILTIN, LOW);
 }
 
 void handleNotFound() {
-    digitalWrite(led, 1);
+    digitalWrite(LED_BUILTIN, HIGH);
+    
     String message = "File Not Found\n\n";
     message += "URI: ";
     message += server.uri();
@@ -88,15 +69,20 @@ void handleNotFound() {
     }
 
     server.send(404, "text/plain", message);
-    digitalWrite(led, 0);
+    
+    digitalWrite(LED_BUILTIN, LOW);
 }
 
 void setup(void) {
-    pinMode(led, OUTPUT);
-    digitalWrite(led, 0);
+    pinMode(LED_BUILTIN, OUTPUT);
+
+    digitalWrite(LED_BUILTIN, LOW);
+
     Serial.begin(115200);
+
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+    WiFi.begin(SSID, PASS);
+    
     Serial.println("");
 
     // Wait for connection

@@ -1,11 +1,16 @@
+#include <Arduino.h>
 #include <SoftwareSerial.h>
 
-// pins
-#define PWM_PIN_AIR_PUMP  5
-#define PWM_PIN_PREHEATER 4
-#define PWM_PIN_HEATER    3
-#define THERMOPROBE_PIN   2
-#define PUMP_RPM_PIN      14
+// analog pins
+#define PWM_PIN_AIR_PUMP  1
+#define PWM_PIN_PREHEATER 3
+#define PWM_PIN_HEATER    5
+#define THERMOPROBE_PIN   7
+
+// digital pins
+#define PUMP_RPM_PIN 1
+#define ESP_TX       2
+#define ESP_RX       4
 
 // voltage divider for thermoprobe
 #define THERMISTOR_DIVIDER_RESISTOR 1000
@@ -15,55 +20,90 @@
 #define PT100_A  3.9083e-3
 #define PT100_B -5.775e-7
 
-bool isShutdown        = true;
-bool debug             = false;
-int pump_min_rpm       = 40;
-int temp_target        = 240;
-int temp_critical      = 270;
-int voltage_divider_r1 = 1000;
+
+// safety limits
+unsigned short tempCritical  = 270;
+unsigned short pumpMinRpm    = 40;
+
+bool isShutdown = true;
+
+// info
+unsigned short pumpTargetRpm = 100;
+unsigned short tempTarget    = 240;
+unsigned short heaterPwm     = 0;
+unsigned short temp          = 0;
+unsigned short rpm           = 0;
 
 // RX | TX
-SoftwareSerial espSerial(2, 3);
+SoftwareSerial espSerial(ESP_RX, ESP_TX);
 
 void setup() {
+    espSerial.begin(115200);
+    Serial.begin(9600);
 
+    pinMode(PWM_PIN_AIR_PUMP , OUTPUT);
+    pinMode(PWM_PIN_PREHEATER, OUTPUT);
+    pinMode(PWM_PIN_HEATER   , OUTPUT);
+
+    pinMode(THERMOPROBE_PIN, INPUT);
+    pinMode(PUMP_RPM_PIN   , INPUT);
+}
+
+void sendInfo() {
+    String json = "{";
+
+    json += "\"time\":"          + String(millis()     ) + ",";
+    json += "\"pumpTargetRpm\":" + String(pumpTargetRpm) + ",";
+    json += "\"tempTarget\":"    + String(tempTarget   ) + ",";
+    json += "\"heaterPwm\":"     + String(heaterPwm    ) + ",";
+    json += "\"temp\":"          + String(temp         ) + ",";
+    json += "\"rpm\":"           + String(rpm          );
+
+    json += "}";
+
+    espSerial.println(json);
 }
 
 void dispatchSerial() {
     if(!espSerial.available()) return;
     
-    String command = espSerial.readString().toLowerCase(); 
+    String command = espSerial.readString();
+    
+    Serial.println(command);
+    
+    command.toLowerCase(); 
 
-    if     (command.startsWith("setcriticaltemp"    )) temp_critical      = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("settargettemp"      )) temp_target        = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("setpumpminrpm"      )) pump_min_rpm       = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("setvoltagedividerr1")) voltage_divider_r1 = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("activate"           )) isShutdown = false;
-    else if(command.startsWith("shutdown"           )) isShutdown = true;
-    else if(command.startsWith("debug"              )) debug      = !debug;
+    if     (command.startsWith("setcriticaltemp" )) tempCritical  = command.substring(command.indexOf(" ") + 1).toInt();
+    else if(command.startsWith("settargettemp"   )) tempTarget    = command.substring(command.indexOf(" ") + 1).toInt();
+    else if(command.startsWith("setpumpminrpm"   )) pumpMinRpm    = command.substring(command.indexOf(" ") + 1).toInt();
+    else if(command.startsWith("setpumptargetrpm")) pumpTargetRpm = command.substring(command.indexOf(" ") + 1).toInt();
+    else if(command.startsWith("activate"        )) isShutdown = false;
+    else if(command.startsWith("shutdown"        )) isShutdown = true;
+    else if(command.startsWith("info"            )) sendInfo();
 }
 
 // returns degrees C based on the resistance of the thermistor (Pt100)
 float measureTemp(float r) {
     double t = (PT100_R0 * PT100_R0) * (PT100_A * PT100_A);
 
-    t -= PT100_R0 * PT100_B * 4 * (PT100_R0 - r);
-    t -= PT100_R0 * PT100_A - sqrt(t);
-    t /= PT100_R0 * PT100_B * 2;
-    
+    t -=  PT100_R0 * PT100_B * 4 * (PT100_R0 - r);
+    t  = -PT100_R0 * PT100_A + sqrt(t);
+    t /=  PT100_R0 * PT100_B * 2;
+
     return t;
 }
 
 // calculates resistance in ohms from a voltage divider
 template<int PIN, int R1, int VIN>
 float measureOhms() {
-    double v = analogRead(PIN) * VIN / 1024.0;
-    double vDrop = (VIN / v) - 1;
-    return R1 * vDrop;
+    double r2 = analogRead(PIN);
+    r2 *= (VIN / 1024.0);
+    r2  = (VIN / r2    ) - 1;
+    return R1 * r2;
 }
 
 
-void shutDown() {
+void shutdown() {
     isShutdown = true;
 
     digitalWrite(PWM_PIN_AIR_PUMP , LOW);
@@ -73,7 +113,6 @@ void shutDown() {
     while(isShutdown) {
         delay(1000);
         dispatchSerial();
-        
     }
 }
 
@@ -97,16 +136,18 @@ void loop() {
     float rt = measureOhms<THERMOPROBE_PIN, THERMISTOR_DIVIDER_RESISTOR, 5>();
     
     // convert to degrees C
-    float temp = measureTemp(rt);
-    float rpm  = measureRPM();
+    temp = measureTemp(rt);
+    rpm  = measureRPM();
     
-    if(temp >= TEMP_CRITICAL) shutdown();
-    if(rpm  <= PUMP_RPM_MIN ) shutdown();
+    if(temp >= tempCritical) shutdown();
+    if(rpm  <= pumpMinRpm  ) shutdown();
     
-    float heaterPwm = min(0, map(t, 0, TEMP_TARGET, 255, 0));
+    heaterPwm = min(0, map(temp, 0, tempTarget, 255, 0));
 
     analogWrite(PWM_PIN_PREHEATER, heaterPwm);
     analogWrite(PWM_PIN_HEATER   , heaterPwm);
     
+    dispatchSerial();
+
     delay(200);
 }
