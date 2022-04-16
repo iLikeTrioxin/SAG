@@ -78,7 +78,7 @@ void setup(void) {
 
     digitalWrite(LED_BUILTIN, LOW);
 
-    Serial.begin(115200);
+    Serial.begin(9600);
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(SSID, PASS);

@@ -30,6 +30,7 @@ bool isShutdown = true;
 // info
 unsigned short pumpTargetRpm = 100;
 unsigned short tempTarget    = 240;
+unsigned short airPumpPwm    = 0;
 unsigned short heaterPwm     = 0;
 unsigned short temp          = 0;
 unsigned short rpm           = 0;
@@ -38,7 +39,7 @@ unsigned short rpm           = 0;
 SoftwareSerial espSerial(ESP_RX, ESP_TX);
 
 void setup() {
-    espSerial.begin(115200);
+    espSerial.begin(9600);
     Serial.begin(9600);
 
     pinMode(PWM_PIN_AIR_PUMP , OUTPUT);
@@ -55,9 +56,11 @@ void sendInfo() {
     json += "\"time\":"          + String(millis()     ) + ",";
     json += "\"pumpTargetRpm\":" + String(pumpTargetRpm) + ",";
     json += "\"tempTarget\":"    + String(tempTarget   ) + ",";
+    json += "\"airPumpPwm\":"    + String(airPumpPwm   ) + ",";
     json += "\"heaterPwm\":"     + String(heaterPwm    ) + ",";
     json += "\"temp\":"          + String(temp         ) + ",";
-    json += "\"rpm\":"           + String(rpm          );
+    json += "\"rpm\":"           + String(rpm          ) + ",";
+    json += "\"shutdown\":"      + String(isShutdown   );
 
     json += "}";
 
@@ -69,7 +72,7 @@ void dispatchSerial() {
     
     String command = espSerial.readString();
     
-    Serial.println(command);
+    Serial.println("esp: " + command);
     
     command.toLowerCase(); 
 
@@ -106,14 +109,17 @@ float measureOhms() {
 void shutdown() {
     isShutdown = true;
 
-    digitalWrite(PWM_PIN_AIR_PUMP , LOW);
-    digitalWrite(PWM_PIN_PREHEATER, LOW);
-    digitalWrite(PWM_PIN_HEATER   , LOW);
+    analogWrite(PWM_PIN_AIR_PUMP , LOW);
+    analogWrite(PWM_PIN_PREHEATER, LOW);
+    analogWrite(PWM_PIN_HEATER   , LOW);
 
     while(isShutdown) {
         delay(1000);
         dispatchSerial();
     }
+
+    // make sure the pump have enough power to start
+    analogWrite(PWM_PIN_AIR_PUMP , 255);
 }
 
 // returns rpm of the pump based on how often the pin is high
@@ -137,15 +143,19 @@ void loop() {
     
     // convert to degrees C
     temp = measureTemp(rt);
-    rpm  = measureRPM();
-    
-    if(temp >= tempCritical) shutdown();
-    if(rpm  <= pumpMinRpm  ) shutdown();
-    
-    heaterPwm = min(0, map(temp, 0, tempTarget, 255, 0));
 
-    analogWrite(PWM_PIN_PREHEATER, heaterPwm);
-    analogWrite(PWM_PIN_HEATER   , heaterPwm);
+    // read the rpm of the pump
+    rpm = measureRPM();
+    
+    if(temp >= tempCritical) return shutdown(); // shutdown if temp is too high
+    if(rpm  <= pumpMinRpm  ) return shutdown(); // shutdown if pump is not working
+
+    heaterPwm  = max(0, map(temp, 0, tempTarget   , 255, 0));
+    airPumpPwm = max(0, map(rpm , 0, pumpTargetRpm, 255, 0));
+
+    analogWrite(PWM_PIN_AIR_PUMP , airPumpPwm);
+    analogWrite(PWM_PIN_PREHEATER, heaterPwm );
+    analogWrite(PWM_PIN_HEATER   , heaterPwm );
     
     dispatchSerial();
 
