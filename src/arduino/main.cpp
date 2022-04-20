@@ -2,10 +2,10 @@
 #include <SoftwareSerial.h>
 
 // analog pins
-#define PWM_PIN_AIR_PUMP  1
-#define PWM_PIN_PREHEATER 3
-#define PWM_PIN_HEATER    5
-#define THERMOPROBE_PIN   7
+#define PWM_PIN_AIR_PUMP  A1
+#define PWM_PIN_PREHEATER A3
+#define PWM_PIN_HEATER    A5
+#define THERMOPROBE_PIN   A5
 
 // digital pins
 #define PUMP_RPM_PIN 1
@@ -19,21 +19,90 @@
 #define PT100_R0 100
 #define PT100_A  3.9083e-3
 #define PT100_B -5.775e-7
+#define JSON_OK R"({"status":"ok"})"
 
+typedef uint8_t byte;
+typedef uint16_t word;
+typedef uint32_t dword;
+typedef uint64_t qword;
+
+typedef int8_t sbyte;
+typedef int16_t sword;
+typedef int32_t sdword;
+typedef int64_t sqword;
+
+class Command {
+public:
+    const char* name;
+    int args;
+    String (*handler)(String&);
+
+    Command(const char* name, int args, String (*handler)(String&)) {
+        this->name = name;
+        this->args = args;
+        this->handler = handler;
+    }
+
+    static bool doIfValid(String& command) {
+        if(!command.startswith(name)) return false;
+        
+        byte args = 0;
+
+        for(char c : command)
+            if(c == ' ') args++;
+
+        if(args != this->args) return false;
+
+        espSerial.println(handler(command));
+
+        return true;
+    }
+};
+
+String getArg(String& command, byte index = 0) {
+    int start = 0;
+    int end = 0;
+
+    for(int i = 0; i < index; i++) {
+        start = command.indexOf(' ', start) + 1;
+    }
+
+    end = command.indexOf(' ', start);
+
+    if(end == -1) end = command.length();
+
+    return command.substring(start, end);
+}
+
+const auto commands = {
+    Command("info"    , 0, [](String&){             return getInfo();}),
+    Command("shutdown", 0, [](String&){ shutdown(); return JSON_OK;  }),
+    Command("activate", 0, [](String&){ activate(); return JSON_OK;  }),
+    Command("set", 2, [](String& c){
+        String arg = getArg(c, 0);
+
+             if(arg == "targettemp") tempTarget    = getArg(c, 1).toInt();
+        else if(arg == "airpumprpm") pumpTargetRpm = getArg(c, 1).toInt();
+        else if(arg == "pumpminrpm") pumpMinRpm    = getArg(c, 1).toInt();
+
+        return JSON_OK;
+    })
+}
 
 // safety limits
-unsigned short tempCritical  = 270;
-unsigned short pumpMinRpm    = 40;
+const
+word tempCritical  = 270;
+byte pumpMinRpm    = 40;
 
 bool isShutdown = true;
 
 // info
-unsigned short pumpTargetRpm = 100;
-unsigned short tempTarget    = 240;
-unsigned short airPumpPwm    = 0;
-unsigned short heaterPwm     = 0;
-unsigned short temp          = 0;
-unsigned short rpm           = 0;
+byte pumpTargetRpm = 100;
+byte tempTarget    = 240;
+byte airPumpPwm    = 0;
+byte heaterPwm     = 0;
+byte temp          = 0;
+byte rpm           = 0;
 
 // RX | TX
 SoftwareSerial espSerial(ESP_RX, ESP_TX);
@@ -50,8 +119,12 @@ void setup() {
     pinMode(PUMP_RPM_PIN   , INPUT);
 }
 
-void sendInfo() {
-    String json = "{";
+String getInfo() {
+    String json;
+
+    json.reserve(100);
+
+    json += "{";
 
     json += "\"time\":"          + String(millis()     ) + ",";
     json += "\"pumpTargetRpm\":" + String(pumpTargetRpm) + ",";
@@ -64,25 +137,20 @@ void sendInfo() {
 
     json += "}";
 
-    espSerial.println(json);
+    return json;
 }
 
 void dispatchSerial() {
     if(!espSerial.available()) return;
     
-    String command = espSerial.readString();
+    String c = espSerial.readString(); c.toLowerCase();
     
-    Serial.println("esp: " + command);
+    Serial.println("esp: " + c);
     
-    command.toLowerCase(); 
-
-    if     (command.startsWith("setcriticaltemp" )) tempCritical  = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("settargettemp"   )) tempTarget    = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("setpumpminrpm"   )) pumpMinRpm    = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("setpumptargetrpm")) pumpTargetRpm = command.substring(command.indexOf(" ") + 1).toInt();
-    else if(command.startsWith("activate"        )) isShutdown = false;
-    else if(command.startsWith("shutdown"        )) isShutdown = true;
-    else if(command.startsWith("info"            )) sendInfo();
+    for(auto& command : commands )
+        if(command.doIfValid(c)) return;
+    
+    espSerial.println("Unknown command or invalid usage.");
 }
 
 // returns degrees C based on the resistance of the thermistor (Pt100)
@@ -100,18 +168,22 @@ float measureTemp(float r) {
 template<int PIN, int R1, int VIN>
 float measureOhms() {
     double r2 = analogRead(PIN);
+
+    if(r2 == 0) return 0;
+
     r2 *= (VIN / 1024.0);
     r2  = (VIN / r2    ) - 1;
+
     return R1 * r2;
 }
 
-
+void activate() { isShutdown = false; }
 void shutdown() {
     isShutdown = true;
 
-    analogWrite(PWM_PIN_AIR_PUMP , LOW);
-    analogWrite(PWM_PIN_PREHEATER, LOW);
-    analogWrite(PWM_PIN_HEATER   , LOW);
+    analogWrite(PWM_PIN_AIR_PUMP , 0);
+    analogWrite(PWM_PIN_PREHEATER, 0);
+    analogWrite(PWM_PIN_HEATER   , 0);
 
     while(isShutdown) {
         delay(1000);

@@ -12,43 +12,19 @@
 
 ESP8266WebServer server(80);
 
-void handleApi() {
+void handleSerial() {
     digitalWrite(LED_BUILTIN, HIGH);
 
-    if(!server.args() || !server.hasArg('method')) return;
+    if(server.hasArg('msg')) {
+        Serial.println(server.arg('msg'));
 
-    String method   = server.arg('method');
-    String response = "";
-
-    switch (method) {
-    case "setcriticaltemp":
-        if(server.hasArg('temp')) Serial.send("setcriticaltemp " + server.arg('temp'));
-        break;
-    case "settargettemp":
-        if(server.hasArg('temp')) Serial.send("settargettemp " + server.arg('temp'));
-        break;
-    case "setpumpminrpm":
-        if(server.hasArg('rpm')) Serial.send("setpumpminrpm " + server.arg('rpm'));
-        break;
-    case "setpumptargetrpm":
-        if(server.hasArg('rpm')) Serial.send("setpumptargetrpm " + server.arg('rpm'));
-        break;
-    case "activate":
-        Serial.send("activate");
-        break;
-    case "shutdown":
-        Serial.send("shutdown");
-        break;
-    case "info":
-        Serial.send("info");
-        while(!Serial.available()) delay(100);
-        response = Serial.readString();
-        break;
-    default:
-        break;
+        while(!Serial.available()) delay(50);
+        
+        server.send(200, "application/json", Serial.readString());
+    }else{
+        server.send(200, "application/json", R"({"error": "no 'msg' argument"})");
     }
-
-    server.send(200, "application/json", response);
+    
     digitalWrite(LED_BUILTIN, LOW);
 }
 
@@ -101,7 +77,10 @@ void setup(void) {
         Serial.println("MDNS responder started");
     }
 
-    server.on("/api", handleApi);
+    server.on("/", []() {
+        server.send(200, "text/html", R"~(Theres nothing here. If you want to monitor this project consider using SAGA (https://github.com/iLikeTrioxin/SAGA).)~");
+    });
+    server.on("/serial", handleApi);
     server.onNotFound(handleNotFound);
     
     server.begin();
