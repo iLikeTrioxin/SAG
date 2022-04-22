@@ -3,8 +3,8 @@
 
 // analog pins
 #define PWM_PIN_AIR_PUMP  A1
-#define PWM_PIN_PREHEATER A3
-#define PWM_PIN_HEATER    A5
+#define PWM_PIN_PREHEATER A2
+#define PWM_PIN_HEATER    A3
 #define THERMOPROBE_PIN   A5
 
 // digital pins
@@ -19,7 +19,7 @@
 #define PT100_R0 100
 #define PT100_A  3.9083e-3
 #define PT100_B -5.775e-7
-#define JSON_OK R"({"status":"ok"})"
+#define JSON_OK "{\"exitCode\":0}"
 
 typedef uint8_t byte;
 typedef uint16_t word;
@@ -31,10 +31,17 @@ typedef int16_t sword;
 typedef int32_t sdword;
 typedef int64_t sqword;
 
+// RX | TX
+SoftwareSerial espSerial(ESP_RX, ESP_TX);
+
+void activate();
+void shutdown();
+String getInfo();
+
 class Command {
 public:
     const char* name;
-    int args;
+    byte args;
     String (*handler)(String&);
 
     Command(const char* name, int args, String (*handler)(String&)) {
@@ -43,8 +50,8 @@ public:
         this->handler = handler;
     }
 
-    static bool doIfValid(String& command) {
-        if(!command.startswith(name)) return false;
+    bool doIfValid(String& command) {
+        if(!command.startsWith(name)) return false;
         
         byte args = 0;
 
@@ -74,21 +81,6 @@ String getArg(String& command, byte index = 0) {
     return command.substring(start, end);
 }
 
-const auto commands = {
-    Command("info"    , 0, [](String&){             return getInfo();}),
-    Command("shutdown", 0, [](String&){ shutdown(); return JSON_OK;  }),
-    Command("activate", 0, [](String&){ activate(); return JSON_OK;  }),
-    Command("set", 2, [](String& c){
-        String arg = getArg(c, 0);
-
-             if(arg == "targettemp") tempTarget    = getArg(c, 1).toInt();
-        else if(arg == "airpumprpm") pumpTargetRpm = getArg(c, 1).toInt();
-        else if(arg == "pumpminrpm") pumpMinRpm    = getArg(c, 1).toInt();
-
-        return JSON_OK;
-    })
-}
-
 // safety limits
 const
 word tempCritical  = 270;
@@ -104,8 +96,20 @@ byte heaterPwm     = 0;
 byte temp          = 0;
 byte rpm           = 0;
 
-// RX | TX
-SoftwareSerial espSerial(ESP_RX, ESP_TX);
+const Command commands[] = {
+    Command("info"    , 0, [](String&){             return getInfo();}),
+    Command("shutdown", 0, [](String&){ shutdown(); return JSON_OK;  }),
+    Command("activate", 0, [](String&){ activate(); return JSON_OK;  }),
+    Command("set", 2, [](String& c){
+        String arg = getArg(c, 0);
+
+             if(arg == "targettemp") tempTarget    = getArg(c, 1).toInt();
+        else if(arg == "airpumprpm") pumpTargetRpm = getArg(c, 1).toInt();
+        else if(arg == "pumpminrpm") pumpMinRpm    = getArg(c, 1).toInt();
+
+        return JSON_OK;
+    })
+};
 
 void setup() {
     espSerial.begin(9600);

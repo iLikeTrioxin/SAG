@@ -15,8 +15,8 @@ ESP8266WebServer server(80);
 void handleSerial() {
     digitalWrite(LED_BUILTIN, HIGH);
 
-    if(server.hasArg('msg')) {
-        Serial.println(server.arg('msg'));
+    if(server.hasArg("msg")) {
+        Serial.println(server.arg("msg"));
 
         while(!Serial.available()) delay(50);
         
@@ -69,7 +69,7 @@ void setup(void) {
 
     Serial.println("");
     Serial.print("Connected to ");
-    Serial.println(ssid);
+    Serial.println(SSID);
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
 
@@ -80,7 +80,7 @@ void setup(void) {
     server.on("/", []() {
         server.send(200, "text/html", R"~(Theres nothing here. If you want to monitor this project consider using SAGA (https://github.com/iLikeTrioxin/SAGA).)~");
     });
-    server.on("/serial", handleApi);
+    server.on("/serial", handleSerial);
     server.onNotFound(handleNotFound);
     
     server.begin();
