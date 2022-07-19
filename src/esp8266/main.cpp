@@ -1,7 +1,3 @@
-/* 
- * This is arduino nano based project using modules esp8266 and PWM regulators
- */
-
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
 #include <ESP8266WebServer.h>
@@ -12,13 +8,25 @@
 
 ESP8266WebServer server(80);
 
+#define DEBUG
+
+#if defined(DEBUG)
+#    define DS(x) x
+#else
+#    define DS(x)
+#endif
+
 void handleSerial() {
     digitalWrite(LED_BUILTIN, HIGH);
 
     if(server.hasArg("msg")) {
-        Serial.println(server.arg("msg"));
+        // clear input buffer
+        while(Serial.available()) Serial.read();
 
-        while(!Serial.available()) delay(50);
+        Serial.print(server.arg("msg"));
+        Serial.flush();
+
+        while(!Serial.available()) delay(100);
         
         server.send(200, "application/json", Serial.readString());
     }else{
@@ -55,26 +63,22 @@ void setup(void) {
     digitalWrite(LED_BUILTIN, LOW);
 
     Serial.begin(9600);
+    Serial.setTimeout(50);
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(SSID, PASS);
     
-    Serial.println("");
-
     // Wait for connection
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
+    while (WiFi.status() != WL_CONNECTED) delay(500);
 
-    Serial.println("");
-    Serial.print("Connected to ");
-    Serial.println(SSID);
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
+    DS(Serial.println("toggleCommands")); // redirect following serial messages to serial monitor
+    DS(Serial.print  ("Connected to " ));
+    DS(Serial.println(SSID            ));
+    DS(Serial.print  ("IP address: "  ));
+    DS(Serial.println(WiFi.localIP()  ));
 
     if (MDNS.begin("esp8266")) {
-        Serial.println("MDNS responder started");
+        DS(Serial.println("MDNS responder started"));
     }
 
     server.on("/", []() {
@@ -85,7 +89,11 @@ void setup(void) {
     
     server.begin();
 
-    Serial.println("HTTP server started");
+    DS(Serial.println("HTTP server started"));
+    DS(Serial.println("toggleCommands"     ));
+
+    // clear serial
+    while(Serial.available()) Serial.read();
 }
 
 void loop(void) {
