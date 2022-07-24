@@ -49,20 +49,21 @@ String* getInfo();
 #include "Command.hpp"
 
 // safety limits
-const
-word tempCritical  = 270;
-byte pumpMinRpm    = 40;
+const word tempCritical = 250;
+      byte pumpMinRpm   =  50;
 
 bool isShutdown = false;
 bool isCommand  = true;
 
 // info
-byte pumpTargetRpm = 100;
-byte tempTarget    = 240;
+byte pumpTargetRpm = 0;
+byte tempTarget    = 0;
 byte airPumpPwm    = 0;
 byte heaterPwm     = 0;
 byte temp          = 0;
 byte rpm           = 0;
+
+void change
 
 const Command commands[] = {
     Command("info"    , 0, [](String*){             return getInfo();}),
@@ -193,9 +194,6 @@ void shutdown() {
     analogWrite(PWM_PIN_AIR_PUMP , 0);
     analogWrite(PWM_PIN_PREHEATER, 0);
     analogWrite(PWM_PIN_HEATER   , 0);
-
-    // make sure the pump have enough power to start
-    analogWrite(PWM_PIN_AIR_PUMP , 255);
 }
 
 // returns rpm of the pump based on how often the pin is high
@@ -238,6 +236,6 @@ void loop() {
     airPumpPwm = max(0, map(rpm , 0, pumpTargetRpm, 255, 0));
 
     analogWrite(PWM_PIN_AIR_PUMP , airPumpPwm);
-    analogWrite(PWM_PIN_PREHEATER, heaterPwm );
-    analogWrite(PWM_PIN_HEATER   , heaterPwm );
+    analogWrite(PWM_PIN_HEATER   ,  heaterPwm);
+    analogWrite(PWM_PIN_PREHEATER,  heaterPwm * 0.5 );
 }
